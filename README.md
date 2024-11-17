@@ -11,7 +11,7 @@ To write an Ansible playbook tailored to **key features the software is designed
 
 I'll break this down into a playbook with key tasks for each of these features.
 
-```
+
 
 ### Key Features and Their Corresponding Tasks:
 
@@ -47,11 +47,9 @@ I'll break this down into a playbook with key tasks for each of these features.
 #### 9. **Service Management:**
    - Ensures **Apache** or **Nginx** is running and enabled to start on boot.
 
----
 
-### How to Run the
 
- Playbook:
+### How to Run the Playbook:
 
 1. **Encrypt sensitive data with Ansible Vault** (for example, the database password and secret key):
    ```bash
