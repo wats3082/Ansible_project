@@ -1,0 +1,190 @@
+
+- name: Deploy Web Application Stack
+  hosts: all
+  become: yes  # Run tasks as sudo user
+  vars:
+    web_app_repo: "https://github.com/example/repo.git"  # Example Git repository for the app
+    db_password: "{{ vault_db_password }}"  # Password should be managed securely using Ansible Vault
+    mysql_root_password: "{{ vault_mysql_root_password }}"
+    nginx_config_template: "nginx_app_config.j2"  # Path to the Nginx configuration template
+    app_directory: "/var/www/myapp"  # Where the app will be deployed
+    firewall_ports:
+      - "80"
+      - "443"
+      - "22"
+  
+  tasks:
+  
+    # Task 1: Update and upgrade all system packages
+    - name: Update and upgrade the system packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+        autoremove: yes
+      when: ansible_os_family == "Debian"
+      notify:
+        - Reboot the machine if necessary
+
+    - name: Update and upgrade the system packages (RedHat)
+      yum:
+        name: '*'
+        state: latest
+      when: ansible_os_family == "RedHat"
+      notify:
+        - Reboot the machine if necessary
+
+    # Task 2: Install required packages (Apache, MySQL, PHP, etc.)
+    - name: Install Apache, MySQL, PHP on Debian systems
+      apt:
+        name:
+          - apache2
+          - mysql-server
+          - php
+          - php-mysql
+          - git
+          - unzip
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Apache, MySQL, PHP on RedHat systems
+      yum:
+        name:
+          - httpd
+          - mariadb-server
+          - php
+          - php-mysqlnd
+          - git
+          - unzip
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    # Task 3: Configure MySQL Database
+    - name: Ensure MySQL service is started and enabled (Debian)
+      service:
+        name: mysql
+        enabled: yes
+        state: started
+      when: ansible_os_family == "Debian"
+
+    - name: Ensure MySQL service is started and enabled (RedHat)
+      service:
+        name: mariadb
+        enabled: yes
+        state: started
+      when: ansible_os_family == "RedHat"
+
+    - name: Set MySQL root password
+      mysql_user:
+        name: root
+        password: "{{ mysql_root_password }}"
+        host: "localhost"
+        priv: "*.*:ALL"
+        state: present
+      when: ansible_os_family in ["Debian", "RedHat"]
+
+    - name: Create application database
+      mysql_db:
+        name: myapp_db
+        state: present
+        encoding: utf8
+        collation: utf8_general_ci
+      when: ansible_os_family in ["Debian", "RedHat"]
+
+    # Task 4: Deploy the web application (pulling code from a Git repo)
+    - name: Clone the web application from Git
+      git:
+        repo: "{{ web_app_repo }}"
+        dest: "{{ app_directory }}"
+        version: "main"  # Replace with the desired branch
+        force: yes
+
+    - name: Set file ownership and permissions for the app directory
+      file:
+        path: "{{ app_directory }}"
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    # Task 5: Configure the web server (Apache or Nginx)
+    - name: Configure Nginx to serve the application (Debian)
+      template:
+        src: "{{ nginx_config_template }}"
+        dest: /etc/nginx/sites-available/myapp
+        mode: '0644'
+      when: ansible_os_family == "Debian"
+
+    - name: Configure Nginx to serve the application (RedHat)
+      template:
+        src: "{{ nginx_config_template }}"
+        dest: /etc/nginx/conf.d/myapp.conf
+        mode: '0644'
+      when: ansible_os_family == "RedHat"
+
+    - name: Enable and start Nginx service
+      service:
+        name: nginx
+        enabled: yes
+        state: started
+      when: ansible_os_family in ["Debian", "RedHat"]
+
+    # Task 6: Configure firewall for HTTP, HTTPS, and SSH access
+    - name: Configure firewall for HTTP, HTTPS, and SSH
+      ufw:
+        rule: allow
+        name: "{{ item }}"
+      with_items: "{{ firewall_ports }}"
+      notify:
+        - Reload ufw
+
+    # Task 7: Install and configure monitoring agent (e.g., Prometheus node exporter, or Datadog agent)
+    - name: Install Prometheus Node Exporter (Debian)
+      apt:
+        name: prometheus-node-exporter
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Prometheus Node Exporter (RedHat)
+      yum:
+        name: prometheus-node-exporter
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Ensure Prometheus Node Exporter is running
+      service:
+        name: prometheus-node-exporter
+        enabled: yes
+        state: started
+
+    # Task 8: Configure Application Secrets (e.g., via environment variables)
+    - name: Create environment file for app secrets
+      copy:
+        content: |
+          DB_PASSWORD={{ db_password }}
+          SECRET_KEY={{ vault_app_secret_key }}
+        dest: /etc/myapp/.env
+        mode: '0644'
+      when: db_password is defined
+
+    # Task 9: Enable and Start Apache Service (if not using Nginx)
+    - name: Enable and start Apache service (Debian)
+      service:
+        name: apache2
+        enabled: yes
+        state: started
+      when: ansible_os_family == "Debian" and ansible_facts.packages['nginx'] is not defined
+
+    - name: Enable and start Apache service (RedHat)
+      service:
+        name: httpd
+        enabled: yes
+        state: started
+      when: ansible_os_family == "RedHat" and ansible_facts.packages['nginx'] is not defined
+
+  handlers:
+    - name: Reboot the machine if necessary
+      reboot:
+        reboot_timeout: 600
+        test_command: uptime
+
+    - name: Reload ufw
+      command: ufw reload
